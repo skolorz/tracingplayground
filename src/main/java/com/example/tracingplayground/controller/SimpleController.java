@@ -1,8 +1,9 @@
 package com.example.tracingplayground.controller;
 
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccessor;
 import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.Tracer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.stream.function.StreamBridge;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -18,35 +19,87 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
-@RequiredArgsConstructor
 @Slf4j
 public class SimpleController {
 
     private final StreamBridge streamBridge;
 
     private final Tracer tracer;
+    private ContextRegistry registry = new ContextRegistry();
 
-    @PostMapping("/")
+    public SimpleController(StreamBridge streamBridge, Tracer tracer) {
+        this.streamBridge = streamBridge;
+        this.tracer = tracer;
+        registry.registerThreadLocalAccessor(new ObservationThreadLocalAccessor());
+        ;
+    }
+
+    @PostMapping("/a")
     public Mono<Void> post(@RequestBody Map<String, Object> data) {
-        try (BaggageInScope scope = tracer.createBaggageInScope("baggageTest", "baggageValue")) {
-            log.info("Just set the baggage field...");
 
-            streamBridge.send("output", MessageBuilder
-                    .withPayload(Map.of("name", "hello from outside"))
-                    .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
-                    .build());
+        return Mono
+                .fromRunnable(() -> {
+                    log.info("Sending message from mono");
+                    streamBridge.send("output", MessageBuilder
+                            .withPayload(Map.of("name", "hello from Mono"))
+                            .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
+                            .build());
+                })
+                .contextWrite(context -> context.put("otherField", "from Mono context"))
+                .then();
+    }
+
+    @PostMapping("/b")
+    public Mono<Void> postWithBaggage(@RequestBody Map<String, Object> data) {
+        try (BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue")) {
 
             return Mono
                     .fromRunnable(() -> {
-                        log.info("Hello from REST controller. About to publish a Kafka message...");
+                        log.info("Sending message from mono");
                         streamBridge.send("output", MessageBuilder
                                 .withPayload(Map.of("name", "hello from Mono"))
                                 .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
                                 .build());
                     })
-                    .contextWrite(context -> context.put("baggageTest", "baggageValue"))
-                    .then();
+                    .contextWrite(context -> context.put("otherField", "from Mono context"))
+                    .then()
+                    .doFinally(s -> scope.close());
         }
+    }
+
+    @PostMapping("/c")
+    public Mono<Void> postWithBaggage2(@RequestBody Map<String, Object> data) {
+
+        return Mono.defer(() -> {
+                    BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue");
+                    return Mono.just(scope)
+                            .fromRunnable(() -> {
+                                log.info("Sending message from mono");
+                                streamBridge.send("output", MessageBuilder
+                                        .withPayload(Map.of("name", "hello from Mono"))
+                                        .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
+                                        .build());
+                            })
+                            .doFinally(s -> scope.close());
+                })
+                .then();
+    }
+
+    @PostMapping("/d")
+    public Mono<Void> postWithBaggage3(@RequestBody Map<String, Object> data) {
+
+        return Mono.defer(() -> {
+                    BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue");
+                    return Mono.just(scope);
+                })
+                .fromRunnable(() -> {
+                    log.info("Sending message from mono");
+                    streamBridge.send("output", MessageBuilder
+                            .withPayload(Map.of("name", "hello from Mono"))
+                            .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
+                            .build());
+                })
+                .then();
     }
 
     @GetMapping("/")
