@@ -90,7 +90,7 @@ public class SimpleController {
 
         return Mono.defer(() -> {
                     BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue");
-                    return Mono.just(scope);
+                    return Mono.empty().then();
                 })
                 .fromRunnable(() -> {
                     log.info("Sending message from mono");
