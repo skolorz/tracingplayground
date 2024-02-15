@@ -61,7 +61,7 @@ public class SimpleController {
                                 .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
                                 .build());
                     })
-                    .contextWrite(context -> context.put("otherField", "from Mono context"))
+                    .contextCapture()
                     .then()
                     .doFinally(s -> scope.close());
         }
@@ -69,7 +69,7 @@ public class SimpleController {
 
     @PostMapping("/c")
     public Mono<Void> postWithBaggage2(@RequestBody Map<String, Object> data) {
-
+        log.info("1. Version C with nested Mono");
         return Mono.defer(() -> {
                     BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue");
                     return Mono.just(scope)
@@ -79,21 +79,23 @@ public class SimpleController {
                                         .withPayload(Map.of("name", "hello from Mono"))
                                         .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
                                         .build());
+                                log.info("Sent");
                             })
-                            .doFinally(s -> scope.close());
+                            .doFinally(any -> scope.close());
                 })
                 .then();
     }
 
     @PostMapping("/d")
     public Mono<Void> postWithBaggage3(@RequestBody Map<String, Object> data) {
-
-        return Mono.defer(() -> {
+        log.info("1. Start");
+        return Mono.fromRunnable(() -> {
+                    log.info("2. Before scope");
                     BaggageInScope scope = tracer.createBaggageInScope("someField", "someValue");
-                    return Mono.empty().then();
+                    log.info("2.1 After scope");
                 })
                 .fromRunnable(() -> {
-                    log.info("Sending message from mono");
+                    log.info("3. Sending message from mono");
                     streamBridge.send("output", MessageBuilder
                             .withPayload(Map.of("name", "hello from Mono"))
                             .setHeader(KafkaHeaders.KEY, UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8))
