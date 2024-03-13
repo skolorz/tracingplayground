@@ -8,6 +8,7 @@ import reactor.core.publisher.Hooks;
 public class TracingplaygroundApplication {
 
 	public static void main(String[] args) {
+		Hooks.enableAutomaticContextPropagation();
 		SpringApplication.run(TracingplaygroundApplication.class, args);
 	}
 
